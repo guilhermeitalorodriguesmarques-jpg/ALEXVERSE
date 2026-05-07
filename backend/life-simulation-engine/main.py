@@ -292,7 +292,7 @@ class LifeSimulationEngine:
         conn = db_pool.get_connection()
         try:
             cur = conn.cursor(cursor_factory=RealDictCursor)
-            # Get recent negative events
+            # Get recent negative events (optimized query)
             cur.execute("""
                 SELECT COUNT(*) as count, AVG(severity) as avg_severity
                 FROM life_events 
@@ -305,7 +305,7 @@ class LifeSimulationEngine:
             if result['avg_severity']:
                 mood_change = int(-result['avg_severity'] / 10)
             
-            # Update city mood
+            # Update city mood with single query
             cur.execute("""
                 UPDATE city_states 
                 SET mood_index = GREATEST(0, LEAST(100, mood_index + %s)),

@@ -68,7 +68,12 @@ export const eventsAPI = {
   },
 }
 
-export const godModeAPI = {
+export const logsAPI = {
+  getNPCToughts: async (limit = 20): Promise<any[]> => {
+    const { data } = await apiClient.get(`/logs/npc-thoughts?limit=${limit}`)
+    return data.thoughts
+  },
+}
   setWeather: async (type: string, temperature: number) => {
     const { data } = await apiClient.post(
       `/god/weather/set?weather_type=${type}&temperature=${temperature}`
@@ -93,6 +98,27 @@ export const godModeAPI = {
   triggerParty: async (neighborhoodId: string) => {
     const { data } = await apiClient.post('/god/city/party', {
       neighborhood_id: neighborhoodId,
+    })
+    return data
+  },
+  triggerBlackout: async (neighborhoodId: string) => {
+    const { data } = await apiClient.post('/god/city/blackout', {
+      neighborhood_id: neighborhoodId,
+    })
+    return data
+  },
+  modifyRelationship: async (npcId: string, otherNpcId: string, affinityChange: number) => {
+    const { data } = await apiClient.post('/god/npc/relationship', {
+      npc_id: npcId,
+      other_npc_id: otherNpcId,
+      affinity_change: affinityChange,
+    })
+    return data
+  },
+  moveNPC: async (npcId: string, placeId: string) => {
+    const { data } = await apiClient.post('/god/npc/move', {
+      npc_id: npcId,
+      place_id: placeId,
     })
     return data
   },

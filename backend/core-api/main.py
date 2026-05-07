@@ -502,11 +502,191 @@ async def god_trigger_party(
             VALUES (%s, %s, 0, 0, %s, %s, %s, %s)
         """, (city_id, "fiesta_masiva", neighborhood_id, 80, 
               "¡Una fiesta masiva estalló en la ciudad!", json.dumps({"scale": "massive"})))
+@app.post("/api/v1/god/city/blackout")
+async def god_trigger_blackout(
+    neighborhood_id: Optional[str] = None,
+    city_id: Optional[str] = None,
+    credentials: HTTPAuthCredentials = Depends(security)
+):
+    """God mode: Trigger blackout"""
+    payload = verify_jwt_token(credentials)
+    verify_admin(payload)
+    
+    if not city_id:
+        city_id = get_default_city()
+    
+    conn = db_pool.get_connection()
+    try:
+        cur = conn.cursor()
+        cur.execute("""
+            INSERT INTO life_events 
+            (city_id, event_type, city_day, city_time, neighborhood_id, severity, 
+             description, raw_data)
+            VALUES (%s, %s, 0, 0, %s, %s, %s, %s)
+        """, (city_id, "apagon", neighborhood_id, 70, 
+              "¡Un apagón masivo dejó a la ciudad a oscuras!", json.dumps({"duration": "2_hours"})))
         conn.commit()
         cur.close()
-        return {"status": "Party triggered", "neighborhood_id": neighborhood_id}
+        return {"status": "Blackout triggered", "neighborhood_id": neighborhood_id}
     finally:
         db_pool.return_connection(conn)
 
-if __name__ == "__main__":
-    uvicorn.run(app, host="0.0.0.0", port=8000, log_level="info")
+@app.post("/api/v1/god/npc/move")
+async def god_move_npc(
+    npc_id: str,
+    place_id: str,
+    credentials: HTTPAuthCredentials = Depends(security)
+):
+    """God mode: Move NPC to place"""
+    payload = verify_jwt_token(credentials)
+    verify_admin(payload)
+    
+    conn = db_pool.get_connection()
+    try:
+        cur = conn.cursor()
+        cur.execute("""
+            UPDATE npcs SET current_place_id = %s, updated_at = NOW() WHERE id = %s
+        """, (place_id, npc_id))
+        conn.commit()
+        cur.close()
+        return {"status": "NPC moved", "npc_id": npc_id, "place_id": place_id}
+    finally:
+        db_pool.return_connection(conn)
+
+@app.post("/api/v1/god/npc/relationship")
+async def god_modify_relationship(
+    npc_id: str,
+    other_npc_id: str,
+    affinity_change: int,
+    credentials: HTTPAuthCredentials = Depends(security)
+):
+    """God mode: Modify NPC relationship"""
+    payload = verify_jwt_token(credentials)
+    verify_admin(payload)
+    
+    conn = db_pool.get_connection()
+    try:
+        cur = conn.cursor()
+        cur.execute("""
+            INSERT INTO npc_relationships (npc_id, other_npc_id, relationship_type, affinity)
+            VALUES (%s, %s, 'conocido', %s)
+            ON CONFLICT (npc_id, other_npc_id) 
+            DO UPDATE SET affinity = npc_relationships.affinity + %s
+        """, (npc_id, other_npc_id, affinity_change, affinity_change))
+        conn.commit()
+        cur.close()
+        return {"status": "Relationship modified", "npc_id": npc_id, "other_npc_id": other_npc_id, "affinity_change": affinity_change}
+    finally:
+        db_pool.return_connection(conn)
+
+# ============================================================================
+# INTERNAL ENDPOINTS (for other services)
+# ============================================================================
+
+@app.post("/internal/life/tick")
+async def internal_life_tick(city_id: Optional[str] = None):
+    """Internal endpoint for life simulation tick"""
+    if not city_id:
+        city_id = get_default_city()
+    
+    # This would trigger the life simulation engine
+    # For now, just update the time
+    conn = db_pool.get_connection()
+    try:
+        cur = conn.cursor()
+        cur.execute("""
+            UPDATE city_states SET current_time = current_time + 1, updated_at = NOW() WHERE id = %s
+        """, (city_id,))
+        conn.commit()
+        cur.close()
+        return {"status": "Tick processed", "city_id": city_id}
+    finally:
+        db_pool.return_connection(conn)
+
+@app.post("/internal/ai/gossip/generate")
+async def internal_generate_gossip(city_id: Optional[str] = None):
+    """Internal endpoint to generate gossip"""
+    async with httpx.AsyncClient() as client:
+        try:
+            response = await client.post(
+                f"{AI_ORCHESTRATOR_URL}/ai/gossip/generate",
+                json={"city_id": city_id or get_default_city()},
+                timeout=30.0
+            )
+            response.raise_for_status()
+            gossip_data = response.json()
+            
+            # Save to DB
+            conn = db_pool.get_connection()
+            try:
+                cur = conn.cursor()
+                cur.execute("""
+                    INSERT INTO gossips (city_id, text, intensity, visibility)
+                    VALUES (%s, %s, %s, %s)
+                """, (city_id or get_default_city(), gossip_data['text'], gossip_data['intensity'], 'public'))
+                conn.commit()
+                cur.close()
+            finally:
+                db_pool.return_connection(conn)
+            
+            return gossip_data
+        except httpx.RequestError as e:
+            raise HTTPException(status_code=500, detail=f"AI service error: {str(e)}")
+
+@app.post("/internal/ai/day-summary")
+async def internal_generate_day_summary(city_id: Optional[str] = None):
+    """Internal endpoint to generate day summary"""
+    async with httpx.AsyncClient() as client:
+        try:
+            response = await client.post(
+                f"{AI_ORCHESTRATOR_URL}/ai/day-summary",
+                json={"city_id": city_id or get_default_city()},
+                timeout=30.0
+            )
+            response.raise_for_status()
+            summary_data = response.json()
+            
+            # Save to DB
+            conn = db_pool.get_connection()
+            try:
+                cur = conn.cursor()
+                cur.execute("""
+                    INSERT INTO day_summaries (city_id, city_day, summary_text, mood_trajectory)
+                    VALUES (%s, 0, %s, %s)
+                """, (city_id or get_default_city(), summary_data['summary'], summary_data['mood_trajectory']))
+                conn.commit()
+                cur.close()
+            finally:
+                db_pool.return_connection(conn)
+            
+            return summary_data
+        except httpx.RequestError as e:
+            raise HTTPException(status_code=500, detail=f"AI service error: {str(e)}")
+
+@app.get("/api/v1/logs/npc-thoughts")
+async def get_npc_thoughts(city_id: Optional[str] = None, limit: int = 20):
+    """Get recent NPC thoughts/logs for God Mode monitoring"""
+    if not city_id:
+        city_id = get_default_city()
+    
+    conn = db_pool.get_connection()
+    try:
+        cur = conn.cursor(cursor_factory=RealDictCursor)
+        cur.execute("""
+            SELECT 
+                n.name as npc_name,
+                nm.content as thought,
+                nm.importance,
+                nm.created_at,
+                nm.memory_type
+            FROM npc_memories nm
+            JOIN npcs n ON nm.npc_id = n.id
+            WHERE n.city_id = %s
+            ORDER BY nm.created_at DESC
+            LIMIT %s
+        """, (city_id, limit))
+        thoughts = [dict(t) for t in cur.fetchall()]
+        cur.close()
+        return {"thoughts": thoughts}
+    finally:
+        db_pool.return_connection(conn)

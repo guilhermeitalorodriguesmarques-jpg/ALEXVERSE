@@ -25,6 +25,7 @@ export default function Home() {
     setRecentEvents,
     setGossips,
     setDaySummaries,
+    darkMode,
   } = useStore()
 
   // Load initial data
@@ -66,7 +67,9 @@ export default function Home() {
   }, [setCityState, setNeighborhoods, setWeather, setNPCs, setRecentEvents, setGossips, setDaySummaries])
 
   return (
-    <main className="w-screen h-screen bg-cyberpunk-darker overflow-hidden flex">
+    <main className={`w-screen h-screen overflow-hidden flex transition-all duration-1000 ${
+      darkMode ? 'bg-cyberpunk-darkest' : 'bg-cyberpunk-darker'
+    }`}>
       {/* Animated Background */}
       <div className="absolute inset-0">
         <div className="absolute top-0 left-0 w-96 h-96 bg-cyberpunk-neon-cyan opacity-10 blur-3xl animate-pulse" />

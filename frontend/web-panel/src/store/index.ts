@@ -21,6 +21,7 @@ interface AlexverseStore {
   isGodMode: boolean
   sidebarOpen: boolean
   selectedNPCId: string | null
+  darkMode: boolean
   
   // Authentication
   isAuthenticated: boolean
@@ -57,6 +58,7 @@ export const useStore = create<AlexverseStore>((set) => ({
   selectedNPCId: null,
   isAuthenticated: false,
   userRole: 'observer',
+  darkMode: false,
   
   // Methods
   setCityState: (city) => set({ city }),
@@ -72,4 +74,5 @@ export const useStore = create<AlexverseStore>((set) => ({
   setAuthenticated: (isAuthenticated, userRole = 'observer') =>
     set({ isAuthenticated, userRole }),
   setSidebarOpen: (sidebarOpen) => set({ sidebarOpen }),
+  setDarkMode: (darkMode: boolean) => set({ darkMode }),
 }))
