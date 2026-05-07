@@ -1,0 +1,206 @@
+version: '3.8'
+
+services:
+  # ============================================================================
+  # PostgreSQL Database
+  # ============================================================================
+  postgres:
+    image: postgres:15-alpine
+    container_name: alexverse-postgres
+    environment:
+      POSTGRES_DB: ${DB_NAME:-alexverse}
+      POSTGRES_USER: ${DB_USER:-alexverse}
+      POSTGRES_PASSWORD: ${DB_PASSWORD:-alexverse}
+      POSTGRES_INITDB_ARGS: "-c shared_buffers=256MB -c max_connections=200"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+      - ./infrastructure/postgres/init.sql:/docker-entrypoint-initdb.d/init.sql
+      - ./infrastructure/postgres/postgresql.conf:/etc/postgresql/postgresql.conf
+    ports:
+      - "5432:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${DB_USER:-alexverse}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - backend-net
+    restart: unless-stopped
+    user: "999:999"
+
+  # ============================================================================
+  # Life Simulation Engine
+  # ============================================================================
+  life-simulation-engine:
+    build:
+      context: ./backend/life-simulation-engine
+      dockerfile: Dockerfile
+    container_name: alexverse-life-engine
+    environment:
+      DB_HOST: postgres
+      DB_PORT: 5432
+      DB_NAME: ${DB_NAME:-alexverse}
+      DB_USER: ${DB_USER:-alexverse}
+      DB_PASSWORD: ${DB_PASSWORD:-alexverse}
+      CORE_API_URL: http://core-api:8000
+      AI_ORCHESTRATOR_URL: http://ai-orchestrator:8001
+    ports:
+      - "8002:8002"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    networks:
+      - backend-net
+    restart: unless-stopped
+    user: "1000:1000"
+
+  # ============================================================================
+  # Social & Story AI Orchestrator
+  # ============================================================================
+  ai-orchestrator:
+    build:
+      context: ./backend/ai-orchestrator
+      dockerfile: Dockerfile
+    container_name: alexverse-ai-orchestrator
+    environment:
+      CORE_API_URL: http://core-api:8000
+      OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+    ports:
+      - "8001:8001"
+    networks:
+      - backend-net
+    restart: unless-stopped
+    user: "1000:1000"
+
+  # ============================================================================
+  # Core API Gateway
+  # ============================================================================
+  core-api:
+    build:
+      context: ./backend/core-api
+      dockerfile: Dockerfile
+    container_name: alexverse-core-api
+    environment:
+      DB_HOST: postgres
+      DB_PORT: 5432
+      DB_NAME: ${DB_NAME:-alexverse}
+      DB_USER: ${DB_USER:-alexverse}
+      DB_PASSWORD: ${DB_PASSWORD:-alexverse}
+      JWT_SECRET: ${JWT_SECRET:-change-this-to-random-secret}
+      AI_ORCHESTRATOR_URL: http://ai-orchestrator:8001
+    ports:
+      - "8000:8000"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    networks:
+      - backend-net
+      - frontend-net
+    restart: unless-stopped
+    user: "1000:1000"
+
+  # ============================================================================
+  # Scheduler / Job Runner
+  # ============================================================================
+  scheduler:
+    build:
+      context: ./backend/scheduler
+      dockerfile: Dockerfile
+    container_name: alexverse-scheduler
+    environment:
+      CORE_API_URL: http://core-api:8000
+      LIFE_ENGINE_URL: http://life-simulation-engine:8002
+      AI_ORCHESTRATOR_URL: http://ai-orchestrator:8001
+      TICK_INTERVAL_SECONDS: ${TICK_INTERVAL_SECONDS:-60}
+    ports:
+      - "8003:8003"
+    depends_on:
+      - core-api
+      - life-simulation-engine
+      - ai-orchestrator
+    networks:
+      - backend-net
+    restart: unless-stopped
+    user: "1000:1000"
+
+  # ============================================================================
+  # Discord Bot
+  # ============================================================================
+  discord-bot:
+    build:
+      context: ./backend/discord-bot
+      dockerfile: Dockerfile
+    container_name: alexverse-discord-bot
+    environment:
+      DISCORD_BOT_TOKEN: ${DISCORD_BOT_TOKEN:-}
+      CORE_API_URL: http://core-api:8000
+      ADMIN_USER_ID: ${ADMIN_USER_ID:-}
+    depends_on:
+      - core-api
+    networks:
+      - backend-net
+    restart: unless-stopped
+    user: "1000:1000"
+
+  # ============================================================================
+  # Web Panel (Next.js)
+  # ============================================================================
+  web-panel:
+    build:
+      context: ./frontend/web-panel
+      dockerfile: Dockerfile
+    container_name: alexverse-web-panel
+    environment:
+      NEXT_PUBLIC_API_URL: http://localhost:8000
+      NODE_ENV: production
+    ports:
+      - "3000:3000"
+    depends_on:
+      - core-api
+    networks:
+      - frontend-net
+    restart: unless-stopped
+    user: "1000:1000"
+
+  # ============================================================================
+  # Nginx Reverse Proxy & TLS
+  # ============================================================================
+  nginx:
+    image: nginx:alpine
+    container_name: alexverse-nginx
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./infrastructure/nginx/nginx.conf:/etc/nginx/nginx.conf:ro
+      - ./infrastructure/nginx/conf.d:/etc/nginx/conf.d:ro
+      - ./infrastructure/nginx/ssl:/etc/nginx/ssl:ro
+      - ./logs:/var/log/nginx
+    depends_on:
+      - core-api
+      - web-panel
+    networks:
+      - frontend-net
+    restart: unless-stopped
+
+# ============================================================================
+# Networks
+# ============================================================================
+networks:
+  backend-net:
+    driver: bridge
+    ipam:
+      config:
+        - subnet: 172.20.0.0/16
+  frontend-net:
+    driver: bridge
+    ipam:
+      config:
+        - subnet: 172.21.0.0/16
+
+# ============================================================================
+# Volumes
+# ============================================================================
+volumes:
+  pgdata:
+    driver: local
